@@ -1,0 +1,13 @@
+code,case,dip,variant,xt3d,nsub,status,rms_mm,max_mm,drop_mm,drop_ana_mm,drop_ratio,ncell
+mf6,homog,5,provost_n2,True,2,ok,1.04657,6.639,49.6193,49.6202,0.999982,1000
+mf6,homog,10,provost_n2,True,2,ok,1.99801,13.91,48.5364,48.4923,1.00091,1000
+mf6,homog,15,provost_n2,True,2,ok,2.85829,21.6566,46.8041,46.6506,1.00329,1000
+mf6,homog,20,provost_n2,True,2,ok,3.70847,29.8815,44.6475,44.1511,1.01124,1000
+mf6,homog,25,provost_n2,True,2,ok,4.68894,38.917,42.1039,41.0697,1.02518,1000
+mf6,homog,30,provost_n2,True,2,ok,6.07996,48.2281,39.4515,37.5,1.05204,1000
+mf6,homog,35,provost_n2,True,2,ok,8.17091,57.6621,36.9587,33.5505,1.10159,1000
+mf6,homog,40,provost_n2,True,2,ok,11.0448,67.2385,34.7242,29.3412,1.18346,1000
+mf6,homog,45,provost_n2,True,2,ok,14.8375,76.6915,33.0329,25,1.32131,1000
+mf6,homog,50,provost_n2,True,2,ok,20.21,85.1507,32.5723,20.6588,1.57668,1000
+mf6,homog,55,provost_n2,True,2,ok,29.2965,92.9452,34.7044,16.4495,2.10975,1000
+mf6,homog,60,provost_n2,True,2,ok,41.8725,130.573,39.1594,12.5,3.13275,1000

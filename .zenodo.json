@@ -1,0 +1,21 @@
+{
+  "title": "disu-slope-corrector: slope correction for dipping layers in layered DISU groundwater models",
+  "upload_type": "software",
+  "description": "Reference implementation of the slope correction for layered DISU (unstructured grid) groundwater models in MODFLOW 6 and MODFLOW-USG: the vertical face area is scaled by sec²α so that vertical conductance across dipping interfaces is geometrically consistent, leaving connectivity, layer elevations and the solver unchanged. Includes the test suite and the scripts and results that reproduce the benchmarks and figures of the accompanying Hydrogeology Journal paper.",
+  "creators": [
+    {
+      "name": "Shokri, Ali",
+      "affiliation": "School of Engineering, University of Waikato, Hamilton, New Zealand"
+    }
+  ],
+  "license": "mit",
+  "keywords": ["groundwater", "MODFLOW 6", "MODFLOW-USG", "DISU", "unstructured grids", "dipping aquifers", "vertical conductance"],
+  "related_identifiers": [
+    {
+      "identifier": "10.5066/P13BNARA",
+      "relation": "references",
+      "scheme": "doi",
+      "resource_type": "dataset"
+    }
+  ]
+}

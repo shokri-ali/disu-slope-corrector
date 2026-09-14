@@ -1,0 +1,5 @@
+code,case,dip,variant,xt3d,nsub,status,rms_mm,max_mm,drop_mm,drop_ana_mm,drop_ratio,ncell
+mf6,homog,15,provost_n1,True,1,ok,2.30584,18.1221,46.7559,46.6506,1.00226,1000
+mf6,homog,30,provost_n1,True,1,ok,4.13168,37.5939,38.5513,37.5,1.02804,1000
+mf6,homog,45,provost_n1,True,1,ok,10.2119,59.5217,32.0377,25,1.28151,1000
+mf6,homog,60,provost_n1,True,1,ok,34.6489,135.211,38.5888,12.5,3.08711,1000

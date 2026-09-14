@@ -1,0 +1,8 @@
+method,resolution,baseflow_m3d,err_pct_vs_fem
+fem,-,489.483,0.0
+plan,coarse,420.249,-14.14
+area,coarse,454.593,-7.13
+full,coarse,494.252,0.97
+plan,refined,420.248,-14.14
+area,refined,454.601,-7.13
+full,refined,494.263,0.98

@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "disu-slope-corrector: slope correction for dipping layers in layered DISU groundwater models"
+version: 0.2.0
+authors:
+  - family-names: Shokri
+    given-names: Ali
+    affiliation: "School of Engineering, University of Waikato, Hamilton, New Zealand"
+license: MIT
+repository-code: "https://github.com/shokri-ali/disu-slope-corrector"
+keywords:
+  - groundwater
+  - MODFLOW 6
+  - MODFLOW-USG
+  - DISU
+  - unstructured grids
+  - dipping aquifers
+  - vertical conductance
