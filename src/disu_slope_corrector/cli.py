@@ -34,8 +34,15 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Maximum permitted local dip (degrees). cos(alpha) "
                         "is clipped to this limit. Default 85.")
     p.add_argument("--pinchout-tol", type=float, default=0.0,
-                   help="Horizontal-connection overlap below this is treated "
-                        "as a pinch-out (zero conductance). Default 0.")
+                   help="Vertical overlap, and cell thickness, at or below "
+                        "this value count as zero. Default 0.")
+    p.add_argument("--pinchout-mode", choices=["thickness", "overlap"],
+                   default="thickness",
+                   help="How to treat horizontal connections whose cells do "
+                        "not overlap. 'thickness' (default) zeroes only a "
+                        "genuine pinch-out, where a cell has no thickness; "
+                        "'overlap' zeroes every non-overlapping pair, which "
+                        "severs flow along a steeply dipping unit.")
     p.add_argument("--column-tol", type=float, default=1.0e-6,
                    help="Horizontal tolerance for grouping cells into the "
                         "same column. Default 1e-6.")
@@ -50,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         neighbours=args.neighbours,
         max_dip_deg=args.max_dip_deg,
         pinchout_tol_m=args.pinchout_tol,
+        pinchout_mode=args.pinchout_mode,
         column_tol_m=args.column_tol,
     )
 
@@ -77,7 +85,12 @@ def main(argv: list[str] | None = None) -> int:
 
     n_vert = int((result.cos_alpha < 1.0).sum())
     n_pinch = int(result.is_pinched.sum())
-    print(f"corrected: {n_vert} vertical connections, {n_pinch} pinch-outs", file=sys.stderr)
+    n_offset = int(result.is_offset.sum())
+    print(
+        f"corrected: {n_vert} vertical connections, {n_pinch} pinch-outs, "
+        f"{n_offset} offset faces left unchanged",
+        file=sys.stderr,
+    )
     return 0
 
 

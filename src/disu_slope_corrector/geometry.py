@@ -59,11 +59,21 @@ def fit_local_plane(xy: np.ndarray, z: np.ndarray) -> LocalPlane:
     LocalPlane
         Best-fit plane coefficients.
 
+    Notes
+    -----
+    The samples need not span both horizontal directions. When they lie on a
+    single line in plan view -- as they do in a one-row cross-section model,
+    where every cell shares the same y -- the dip along that line is still
+    fully determined, and only the perpendicular component is unknowable. The
+    fit then returns the gradient along the sampled direction and zero across
+    it, which is the correct plane for a model that is uniform in that
+    direction. Samples at a single point carry no dip information at all and
+    return a flat plane, leaving the connection uncorrected.
+
     Raises
     ------
     ValueError
-        If fewer than 3 samples are supplied, or if the design matrix is
-        rank-deficient (collinear samples).
+        If fewer than 3 samples are supplied.
     """
     xy = np.asarray(xy, dtype=float)
     z = np.asarray(z, dtype=float)
@@ -74,13 +84,34 @@ def fit_local_plane(xy: np.ndarray, z: np.ndarray) -> LocalPlane:
     if xy.shape[0] < 3:
         raise ValueError(f"need at least 3 samples to fit a plane; got {xy.shape[0]}")
 
-    design = np.column_stack([np.ones(xy.shape[0]), xy[:, 0], xy[:, 1]])
-    rank = np.linalg.matrix_rank(design)
-    if rank < 3:
-        raise ValueError("interface samples are collinear; cannot fit a plane")
+    # Fit about the sample centroid: it conditions the solve, and it makes the
+    # degenerate cases below easy to express.
+    centre = xy.mean(axis=0)
+    centred = xy - centre
+    _, svals, vt = np.linalg.svd(centred, full_matrices=False)
+    tol = max(xy.shape[0], 2) * float(np.finfo(float).eps) * float(svals[0])
+    rank = int((svals > tol).sum())
 
-    coeffs, *_ = np.linalg.lstsq(design, z, rcond=None)
-    return LocalPlane(a=float(coeffs[0]), b=float(coeffs[1]), c=float(coeffs[2]))
+    if rank >= 2:
+        design = np.column_stack([np.ones(xy.shape[0]), centred[:, 0], centred[:, 1]])
+        coeffs, *_ = np.linalg.lstsq(design, z, rcond=None)
+        z0, b, c = float(coeffs[0]), float(coeffs[1]), float(coeffs[2])
+    elif rank == 1:
+        # Collinear in plan view: fit z along the sampled direction only.
+        direction = vt[0]
+        s = centred @ direction
+        design = np.column_stack([np.ones(s.size), s])
+        coeffs, *_ = np.linalg.lstsq(design, z, rcond=None)
+        z0 = float(coeffs[0])
+        gradient = float(coeffs[1])
+        b = gradient * float(direction[0])
+        c = gradient * float(direction[1])
+    else:
+        # Every sample at one location: no dip information.
+        z0, b, c = float(np.mean(z)), 0.0, 0.0
+
+    a = z0 - b * float(centre[0]) - c * float(centre[1])
+    return LocalPlane(a=float(a), b=b, c=c)
 
 
 def cos_alpha_from_gradient(b: float, c: float) -> float:

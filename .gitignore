@@ -13,3 +13,11 @@ build/
 .env
 .venv/
 venv/
+
+# paper reproduction outputs
+paper/figures/journal/
+paper/**/runs/
+paper/enhanced_connectivity/archive/
+*.hds
+*.cbc
+*.lst

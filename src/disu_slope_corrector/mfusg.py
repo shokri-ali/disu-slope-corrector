@@ -129,7 +129,13 @@ def correct_mfusg(nam_file: str | Path,
                   output_ws: str | Path,
                   centroids_csv: str | Path,
                   **correction_kwargs) -> CorrectionResult:
-    """Convenience: load, correct, save in one call."""
+    """Convenience: load, correct, save in one call.
+
+    Uses ``code="mfusg"``: MODFLOW-USG takes the vertical length from the cell
+    TOP/BOT thicknesses rather than CL1/CL2, so both the area and length factors
+    are applied to FAHL (FAHL*=sec^2) and CL1/CL2 are left unchanged.
+    """
+    correction_kwargs.setdefault("code", "mfusg")
     geom, mf = load_mfusg_disu(nam_file, model_ws, centroids_csv=centroids_csv)
     result = apply_correction(geom, **correction_kwargs)
     save_mfusg_disu(mf, result, output_ws)

@@ -54,12 +54,50 @@ def test_fit_too_few_samples_raises():
         fit_local_plane(xy, z)
 
 
-def test_fit_collinear_samples_raises():
-    """Samples on a single line cannot define a plane."""
+def test_fit_collinear_samples_uses_the_sampled_direction():
+    """Samples on one line in plan view still determine the dip along it.
+
+    This is the one-row cross-section case: every column shares the same y, so
+    the across-strike gradient cannot be known and is returned as zero.
+    """
     xy = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
-    z = np.array([0.0, 1.0, 2.0, 3.0])
-    with pytest.raises(ValueError, match="collinear"):
-        fit_local_plane(xy, z)
+    z = np.array([0.0, -1.0, -2.0, -3.0])  # dips 45 degrees toward +x
+    plane = fit_local_plane(xy, z)
+    assert plane.b == pytest.approx(-1.0, abs=1e-12)
+    assert plane.c == pytest.approx(0.0, abs=1e-12)
+    assert plane.a == pytest.approx(0.0, abs=1e-12)
+    assert plane.alpha_deg == pytest.approx(45.0, abs=1e-9)
+
+
+def test_fit_collinear_along_y():
+    """The degenerate fit works along any direction, not only x."""
+    xy = np.array([[5.0, 0.0], [5.0, 10.0], [5.0, 20.0]])
+    z = np.array([0.0, -10.0, -20.0])
+    plane = fit_local_plane(xy, z)
+    assert plane.b == pytest.approx(0.0, abs=1e-12)
+    assert plane.c == pytest.approx(-1.0, abs=1e-12)
+    assert plane.alpha_deg == pytest.approx(45.0, abs=1e-9)
+
+
+def test_fit_collinear_oblique_splits_gradient_between_axes():
+    """Along y = x, the unit gradient splits evenly between b and c."""
+    xy = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+    z = np.array([0.0, -math.sqrt(2.0), -2.0 * math.sqrt(2.0)])
+    plane = fit_local_plane(xy, z)
+    half = -1.0 / math.sqrt(2.0)
+    assert plane.b == pytest.approx(half, abs=1e-12)
+    assert plane.c == pytest.approx(half, abs=1e-12)
+    assert plane.alpha_deg == pytest.approx(45.0, abs=1e-9)
+
+
+def test_fit_identical_points_returns_flat_plane():
+    """Samples at a single location carry no dip information at all."""
+    xy = np.array([[3.0, 4.0], [3.0, 4.0], [3.0, 4.0]])
+    z = np.array([7.0, 7.0, 7.0])
+    plane = fit_local_plane(xy, z)
+    assert plane.b == pytest.approx(0.0, abs=1e-12)
+    assert plane.c == pytest.approx(0.0, abs=1e-12)
+    assert plane.cos_alpha == pytest.approx(1.0, abs=1e-12)
 
 
 # ---------------------------------------------------------------------------

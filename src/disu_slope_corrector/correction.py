@@ -14,16 +14,44 @@ The algorithm (matches Algorithm 1 in Shokri 2026, Section 2.3):
          b. Collect interface elevations from the ``k`` nearest columns.
          c. Fit a plane to (x, y, z_interface) over those samples.
          d. Compute cos(alpha) and clip to ``max_dip_deg``.
-         e. Multiply face area by sec(alpha).
-         f. Multiply connection length by cos(alpha).
+         e. Apply the area (sec) and length (cos) corrections to the vertical
+            connection so the conductance is scaled by sec^2(alpha).
+
+    HOW THE LENGTH CORRECTION IS EXPRESSED
+    --------------------------------------
+    Both MODFLOW 6 and MODFLOW-USG derive *vertical* conductance between
+    layered cells from the cell TOP/BOT half-thicknesses and the face area, and
+    do not use CL12 for vertical connections.  For MF6 this was verified by a
+    single-connection flux test; for MODFLOW-USG by running Benchmark A with
+    FAHL x sec and CL12 x cos, which reproduced only the area-only result,
+    whereas FAHL x sec^2 reproduced the analytical heads exactly.  Scaling CL12
+    therefore has no effect on vertical flow in either code, so BOTH factors
+    are folded into HWVA/FAHL: HWVA *= sec^2(alpha), CL12 is left unchanged.
+    This keeps the correction in the geometric arrays (not in K33) and leaves
+    TOP/BOT as the true layer elevations.
+
+    ``code`` is kept for the adapters and accepts ``"mf6"`` or ``"mfusg"``;
+    both give the same arrays.  ``code="mfusg_cl12"`` reproduces the earlier
+    split (HWVA *= sec, CL12 *= cos) for comparison only.
+
     4. For each horizontal connection (i, j) in the same layer:
          a. Compute the true elevation overlap (Eq. 9).
-         b. If overlap <= 0, set connection conductance to zero.
-         c. Otherwise replace the face height with the overlap.
+         b. If the cells overlap, replace the face height with the overlap.
+         c. If they do not overlap because one of them has wedged out to zero
+            thickness, the connection is a genuine pinch-out and its
+            conductance is set to zero.
+         d. If they do not overlap because a steeply dipping unit has carried
+            them past each other, the unit is still continuous and the
+            connection still has to conduct along it. Zeroing it would sever
+            flow down the dip, so the connection keeps the face the
+            preprocessor built and is flagged in ``is_offset`` instead.
+            ``pinchout_mode="overlap"`` restores the published Algorithm 1
+            rule, which zeroes every non-overlapping pair.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -94,7 +122,10 @@ class CorrectionResult:
     hwva: np.ndarray
     # Per-connection diagnostics, indexed the same way as ja/ihc/cl12/hwva.
     cos_alpha: np.ndarray
-    is_pinched: np.ndarray  # True where horizontal overlap <= 0
+    is_pinched: np.ndarray  # True where the unit has wedged out (zero conductance)
+    # True where two cells of a continuous unit are offset past each other by a
+    # steep dip. These keep the face height the preprocessor supplied.
+    is_offset: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
     columns: list[list[int]] = field(default_factory=list)
 
 
@@ -151,7 +182,9 @@ def apply_correction(geom: DisuGeometry,
                      neighbours: int = 8,
                      max_dip_deg: float = 85.0,
                      pinchout_tol_m: float = 0.0,
-                     column_tol_m: float = 1.0e-6) -> CorrectionResult:
+                     pinchout_mode: str = "thickness",
+                     column_tol_m: float = 1.0e-6,
+                     code: str = "mfusg") -> CorrectionResult:
     """Apply slope-aware geometric corrections to a DISU connection set.
 
     Parameters
@@ -165,11 +198,25 @@ def apply_correction(geom: DisuGeometry,
         Maximum permitted local dip. cos(alpha) is clipped so that alpha
         cannot exceed this value. Default 85 degrees.
     pinchout_tol_m : float
-        Horizontal-connection overlap below this threshold is treated as a
-        pinch-out (zero conductance). Default 0.0 m.
+        Vertical overlap, and cell thickness, at or below this value count as
+        zero. Default 0.0 m.
+    pinchout_mode : str
+        How to treat a horizontal connection whose cells do not overlap.
+        ``"thickness"`` (default) zeroes it only when one of the cells has
+        wedged out to zero thickness; cells merely carried past each other by a
+        steep dip keep their connection and are flagged in ``is_offset``.
+        ``"overlap"`` restores the published Algorithm 1 rule and zeroes every
+        non-overlapping pair, which severs flow along a steeply dipping unit.
     column_tol_m : float
         Horizontal tolerance for grouping cells into the same column.
         Default 1e-6 m (essentially exact centroid match).
+    code : str
+        Target solver, ``"mfusg"`` (default) or ``"mf6"``. Both fold the area
+        and bedding-normal length factors into HWVA (``HWVA *= sec^2``) and
+        leave CL12 unchanged, because neither solver uses CL12 for vertical
+        conductance (see the module docstring). ``"mfusg_cl12"`` applies the
+        earlier split (HWVA*=sec, CL12*=cos), which only corrects the area in
+        both solvers; it is kept for comparison.
 
     Returns
     -------
@@ -177,10 +224,18 @@ def apply_correction(geom: DisuGeometry,
         Corrected ``cl12`` and ``hwva`` arrays, plus per-connection
         diagnostics.
     """
+    if code not in ("mf6", "mfusg", "mfusg_cl12"):
+        raise ValueError(f"code must be 'mf6', 'mfusg' or 'mfusg_cl12', got {code!r}")
+    if pinchout_mode not in ("thickness", "overlap"):
+        raise ValueError(
+            "pinchout_mode must be 'thickness' or 'overlap', "
+            f"got {pinchout_mode!r}"
+        )
     cl12 = geom.cl12.astype(float, copy=True)
     hwva = geom.hwva.astype(float, copy=True)
     cos_alpha_out = np.ones(geom.ja.size, dtype=float)
     is_pinched = np.zeros(geom.ja.size, dtype=bool)
+    is_offset = np.zeros(geom.ja.size, dtype=bool)
 
     # --- Identify columns and per-column ordering. ---
     columns = identify_columns(geom.xc, geom.yc, tol=column_tol_m)
@@ -211,6 +266,7 @@ def apply_correction(geom: DisuGeometry,
     # MF6 and MFUSG both place the self-reference at position 0 of each
     # cell's row, so we skip k == 0 unconditionally.
     nja_offset = 0
+    n_unstacked = 0
     for i in range(geom.iac.size):
         n_conn = int(geom.iac[i])
         for k in range(n_conn):
@@ -223,22 +279,34 @@ def apply_correction(geom: DisuGeometry,
                 continue
             ihc = int(geom.ihc[ja_idx])
             if ihc == 0:
-                _correct_vertical(
+                stacked = _correct_vertical(
                     geom, i, j0, ja_idx, cl12, hwva, cos_alpha_out,
                     columns, col_xy, cell_to_colpos, interface_z,
-                    neighbours, max_dip_deg,
+                    neighbours, max_dip_deg, code,
                 )
+                if not stacked:
+                    n_unstacked += 1
             else:
                 _correct_horizontal(
-                    geom, i, j0, ja_idx, hwva, is_pinched, pinchout_tol_m,
+                    geom, i, j0, ja_idx, hwva, is_pinched, is_offset,
+                    pinchout_tol_m, pinchout_mode,
                 )
         nja_offset += n_conn
+
+    if n_unstacked:
+        warnings.warn(
+            f"{n_unstacked // 2} vertical connection(s) join cells that are not stacked in "
+            "the same column and were left uncorrected. The correction assumes a layered "
+            "grid in which all layers share one plan-view tessellation.",
+            UserWarning, stacklevel=2,
+        )
 
     return CorrectionResult(
         cl12=cl12,
         hwva=hwva,
         cos_alpha=cos_alpha_out,
         is_pinched=is_pinched,
+        is_offset=is_offset,
         columns=columns,
     )
 
@@ -251,17 +319,23 @@ def _correct_vertical(geom: DisuGeometry, i: int, j: int, ja_idx: int,
                        cell_to_colpos: dict[int, tuple[int, int]],
                        interface_z: dict[tuple[int, int], float],
                        neighbours: int,
-                       max_dip_deg: float) -> None:
-    """Correct one vertical (ihc=0) connection in-place."""
+                       max_dip_deg: float,
+                       code: str) -> None:
+    """Correct one vertical (ihc=0) connection in-place.
+
+    The conductance is scaled by sec^2(alpha) through HWVA; CL12 is left
+    unchanged because neither MF6 nor MODFLOW-USG uses it for vertical
+    conductance (see module docstring).
+    """
     col_i, pos_i = cell_to_colpos.get(i, (None, None))
     col_j, pos_j = cell_to_colpos.get(j, (None, None))
     if col_i is None or col_j is None or col_i != col_j:
-        return  # not a stacked pair in the same column
+        return False  # not a stacked pair in the same column
 
     upper_pos = min(pos_i, pos_j)
     key = (col_i, upper_pos)
     if key not in interface_z:
-        return
+        return True
 
     target = col_xy[col_i]
     nbr_cols = _knn_columns(col_xy, target, neighbours)
@@ -272,28 +346,50 @@ def _correct_vertical(geom: DisuGeometry, i: int, j: int, ja_idx: int,
             samples_xy.append(col_xy[c])
             samples_z.append(interface_z[(c, upper_pos)])
     if len(samples_xy) < 3:
-        return  # not enough samples to fit a plane; leave connection alone
+        return True  # not enough samples to fit a plane; leave connection alone
 
     plane = fit_local_plane(np.asarray(samples_xy), np.asarray(samples_z))
     cos_a = clip_cos_alpha(plane.cos_alpha, max_dip_deg=max_dip_deg)
     sec_a = 1.0 / cos_a
 
-    hwva[ja_idx] = hwva[ja_idx] * sec_a
-    cl12[ja_idx] = cl12[ja_idx] * cos_a
+    if code == "mfusg_cl12":
+        # Earlier split, kept for comparison: corrects only the area in practice,
+        # because the solvers take the vertical length from TOP/BOT, not CL12.
+        hwva[ja_idx] = hwva[ja_idx] * sec_a
+        cl12[ja_idx] = cl12[ja_idx] * cos_a
+    else:  # mf6 and mfusg
+        # Vertical conductance uses TOP/BOT half-thicknesses and the face area,
+        # so fold BOTH the area and length factors into HWVA: net sec^2.
+        hwva[ja_idx] = hwva[ja_idx] * sec_a * sec_a
     cos_alpha_out[ja_idx] = cos_a
+    return True
 
 
 def _correct_horizontal(geom: DisuGeometry, i: int, j: int, ja_idx: int,
                          hwva: np.ndarray, is_pinched: np.ndarray,
-                         pinchout_tol_m: float) -> None:
-    """Correct one horizontal (ihc != 0) connection's face height (Eq. 9)."""
-    overlap = vertical_overlap(
-        float(geom.top[i]), float(geom.bot[i]),
-        float(geom.top[j]), float(geom.bot[j]),
-    )
+                         is_offset: np.ndarray, pinchout_tol_m: float,
+                         pinchout_mode: str = "thickness") -> None:
+    """Correct one horizontal (ihc != 0) connection's face height (Eq. 9).
+
+    Two different situations produce zero overlap and they need different
+    answers. If one of the cells has no thickness the unit has wedged out and
+    the connection genuinely carries no flow. If both cells have thickness but
+    a steep dip has carried them past each other, the unit is continuous and
+    the connection must still conduct along it; zeroing the face there severs
+    flow down the dip, so the connection is left as supplied and flagged.
+    """
+    top_i, bot_i = float(geom.top[i]), float(geom.bot[i])
+    top_j, bot_j = float(geom.top[j]), float(geom.bot[j])
+    overlap = vertical_overlap(top_i, bot_i, top_j, bot_j)
+    thickness_i, thickness_j = top_i - bot_i, top_j - bot_j
+
     if overlap <= pinchout_tol_m:
-        hwva[ja_idx] = 0.0
-        is_pinched[ja_idx] = True
+        wedged_out = min(thickness_i, thickness_j) <= pinchout_tol_m
+        if wedged_out or pinchout_mode == "overlap":
+            hwva[ja_idx] = 0.0
+            is_pinched[ja_idx] = True
+        else:
+            is_offset[ja_idx] = True
         return
 
     # Original HWVA for a horizontal connection encodes face width times
@@ -302,10 +398,7 @@ def _correct_horizontal(geom: DisuGeometry, i: int, j: int, ja_idx: int,
     # uncorrected face height. We use the average cell thickness as the
     # uncorrected height, which matches how plan-view preprocessors build
     # this term in practice. The corrected HWVA is then face_width * overlap.
-    avg_height = 0.5 * (
-        (float(geom.top[i]) - float(geom.bot[i]))
-        + (float(geom.top[j]) - float(geom.bot[j]))
-    )
+    avg_height = 0.5 * (thickness_i + thickness_j)
     if avg_height <= 0.0:
         hwva[ja_idx] = 0.0
         is_pinched[ja_idx] = True

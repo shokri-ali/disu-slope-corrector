@@ -113,7 +113,13 @@ def correct_mf6(sim_ws: str | Path,
 
     Returns the CorrectionResult so callers can inspect per-connection
     cos(alpha) and pinch-out flags.
+
+    The correction is applied with ``code="mf6"``: MODFLOW 6 ignores CL12 for
+    vertical conductance (it uses the cell TOP/BOT thicknesses), so the full
+    sec^2 vertical-conductance factor is folded into HWVA rather than split
+    across HWVA and CL12. Callers may override via ``code`` in kwargs.
     """
+    correction_kwargs.setdefault("code", "mf6")
     geom, gwf = load_mf6_disu(sim_ws, model_name=model_name)
     result = apply_correction(geom, **correction_kwargs)
     save_mf6_disu(gwf, result, output_ws)
